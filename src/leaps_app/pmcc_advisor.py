@@ -5,6 +5,11 @@ from typing import Any
 
 import pandas as pd
 
+def _proxy_short_delta(spot_price: float, strike: float) -> float:
+    moneyness = strike / max(spot_price, 0.01)
+    return max(0.02, min(0.60, 1.5 - moneyness))
+
+
 RISK_TO_SHORT_DELTA = {
     "conservative": 0.15,
     "moderate": 0.25,
@@ -27,6 +32,7 @@ def suggest_short_calls(
     contracts = int(long_leap.get("contracts", 1))
 
     break_even_like = long_strike + long_debit
+    spot_price = float(long_leap.get("spot_price", break_even_like))
 
     rows: list[dict[str, Any]] = []
     for contract in option_chain:
@@ -38,6 +44,8 @@ def suggest_short_calls(
         expiration_raw = details.get("expiration_date")
         strike = details.get("strike_price")
         delta = greeks.get("delta")
+        if delta is None:
+            delta = _proxy_short_delta(spot_price, float(strike)) if strike is not None else None
 
         if expiration_raw is None or strike is None or delta is None:
             continue

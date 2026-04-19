@@ -2,19 +2,21 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import os
+import sys
 from pathlib import Path
 
-import pandas as pd
 import streamlit as st
 
-from .leap_selector import select_best_leap_calls
-from .pmcc_advisor import suggest_short_calls
-from .polygon_client import PolygonApiError, PolygonClient
+if __package__ in {None, ""}:
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from leaps_app.leap_selector import select_best_leap_calls
+from leaps_app.pmcc_advisor import suggest_short_calls
+from leaps_app.yahoo_client import YahooApiError, YahooDataClient
 
 st.set_page_config(page_title="LEAP + PMCC Advisor", layout="wide")
 st.title("INTC LEAP Selector + Poor Man's Covered Call Advisor")
-st.caption("Uses Polygon (Massive) live market data with built-in 5 req/min rate limiting.")
+st.caption("Uses Yahoo Finance live data (free API path).")
 
 
 def load_positions(path: Path) -> list[dict]:
@@ -30,7 +32,6 @@ def save_positions(path: Path, positions: list[dict]) -> None:
 
 with st.sidebar:
     st.header("Settings")
-    api_key = st.text_input("Polygon API Key", value=os.getenv("POLYGON_API_KEY", ""), type="password")
     symbol = st.text_input("Underlying", value="INTC").strip().upper()
     risk_profile = st.selectbox("Risk Profile", ["conservative", "moderate", "aggressive"], index=1)
     cycle = st.selectbox("Call Writing Cycle", ["weekly", "monthly"], index=0)
@@ -40,26 +41,12 @@ with st.sidebar:
         help="Where your bought LEAP positions are stored.",
     )
 
-if not api_key:
-    st.warning("Enter your Polygon API key in the sidebar to continue.")
-    st.stop()
-
-client = PolygonClient(api_key=api_key, max_requests_per_minute=5)
+client = YahooDataClient()
 
 try:
-    snapshot = client.get_stock_snapshot(symbol)
-    ticker = snapshot.get("ticker", {})
-    spot = ticker.get("lastTrade", {}).get("p") or ticker.get("day", {}).get("c")
-    if not spot:
-        trade = client.get_stock_last_trade(symbol)
-        spot = trade.get("last", {}).get("price")
-
-    if not spot:
-        st.error("Could not fetch stock price.")
-        st.stop()
-
+    spot = client.get_spot_price(symbol)
     st.metric(f"{symbol} Spot Price", f"${spot:,.2f}")
-except PolygonApiError as exc:
+except YahooApiError as exc:
     st.error(f"API error: {exc}")
     st.stop()
 
@@ -109,6 +96,7 @@ with col2:
                     "strike": pos_strike,
                     "entry_price": pos_entry,
                     "contracts": int(pos_contracts),
+                    "spot_price": spot,
                 }
             )
             save_positions(positions_path, positions)
@@ -132,6 +120,7 @@ selected_idx = st.selectbox(
     format_func=lambda i: f"{matching[i].get('option_ticker') or matching[i]['underlying']} | K={matching[i]['strike']} | debit={matching[i]['entry_price']}",
 )
 selected_long = matching[selected_idx]
+selected_long["spot_price"] = spot
 
 short_min = dt.date.today() + dt.timedelta(days=5 if cycle == "weekly" else 22)
 short_max = dt.date.today() + dt.timedelta(days=17 if cycle == "weekly" else 55)
@@ -156,6 +145,4 @@ else:
         f"est premium ${top['total_premium']:.2f}"
     )
 
-st.caption(
-    "Note: This is guidance, not financial advice. Validate liquidity, assignment risk, and earnings/events before trading."
-)
+st.caption("Note: This is guidance, not financial advice.")

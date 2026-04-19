@@ -5,6 +5,11 @@ from typing import Any
 
 import pandas as pd
 
+def _proxy_call_delta(spot_price: float, strike: float) -> float:
+    moneyness = strike / max(spot_price, 0.01)
+    return max(0.05, min(0.95, 1.5 - moneyness))
+
+
 RISK_TO_LONG_DELTA = {
     "conservative": 0.80,
     "moderate": 0.75,
@@ -41,6 +46,8 @@ def select_best_leap_calls(
         expiration_raw = details.get("expiration_date")
         strike = details.get("strike_price")
         delta = greeks.get("delta")
+        if delta is None:
+            delta = _proxy_call_delta(spot_price, float(strike)) if strike is not None else None
 
         if expiration_raw is None or strike is None or delta is None:
             continue
