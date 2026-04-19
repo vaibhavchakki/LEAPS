@@ -1,0 +1,1 @@
+"""LEAPS / Poor-Man's Covered Call helper application."""
